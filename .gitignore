@@ -18,6 +18,15 @@ lib
 lib64
 __pycache__
 
+# Python3 pyvenv
+pyvenv.cfg
+.Python
+include
+pip-delete-this-directory.txt
+pip-selfcheck.json
+ipython.1.gz
+nosetests.1
+
 # Installer logs
 pip-log.txt
 .swp
@@ -31,6 +40,10 @@ nosetests.xml
 .cache/*
 .pytest_cache/*
 .pytest_config
+
+# Azure Pipelines
+junit
+test-results.xml
 
 # Developer
 .idea
@@ -61,6 +74,16 @@ report_archives
 archived_reports
 html_report.html
 report.html
+report.xml
+
+# Tours
+tours_exported
+
+# Images
+images_exported
+
+# Automated Visual Testing
+visual_baseline
 
 # Other
 selenium-server-standalone.jar

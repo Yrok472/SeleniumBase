@@ -19,6 +19,7 @@ class SeleniumBrowser(Plugin):
     self.options.server -- the server used by the test (--server)
     self.options.port -- the port used by the test (--port)
     self.options.proxy -- designates the proxy server:port to use. (--proxy)
+    self.options.agent -- designates the User Agent for the browser. (--agent)
     self.options.headless -- the option to run headlessly (--headless)
     self.options.demo_mode -- the option to slow down Selenium (--demo_mode)
     self.options.demo_sleep -- Selenium action delay in DemoMode (--demo_sleep)
@@ -27,6 +28,9 @@ class SeleniumBrowser(Plugin):
     self.options.js_checking_on -- option to check for js errors (--check_js)
     self.options.ad_block -- the option to block some display ads (--ad_block)
     self.options.verify_delay -- delay before MasterQA checks (--verify_delay)
+    self.options.disable_csp -- disable Content Security Policy (--disable_csp)
+    self.options.save_screenshot -- save screen after test (--save_screenshot)
+    self.options.visual_baseline -- set the visual baseline (--visual_baseline)
     self.options.timeout_multiplier -- increase defaults (--timeout_multiplier)
     """
     name = 'selenium'  # Usage: --with-selenium
@@ -74,6 +78,13 @@ class SeleniumBrowser(Plugin):
                             A dict key from proxy_list.PROXY_LIST
                     Default: None.""")
         parser.add_option(
+            '--agent', action='store',
+            dest='user_agent',
+            default=None,
+            help="""Designates the User-Agent for the browser to use.
+                    Format: A string.
+                    Default: None.""")
+        parser.add_option(
             '--headless', action="store_true",
             dest='headless',
             default=False,
@@ -119,6 +130,30 @@ class SeleniumBrowser(Plugin):
             help="""Setting this overrides the default wait time
                     before each MasterQA verification pop-up.""")
         parser.add_option(
+            '--disable_csp', action="store_true",
+            dest='disable_csp',
+            default=False,
+            help="""Using this disables the Content Security Policy of
+                    websites, which may interfere with some features of
+                    SeleniumBase, such as loading custom JavaScript
+                    libraries for various testing actions.
+                    Setting this to True (--disable_csp) overrides the
+                    value set in seleniumbase/config/settings.py""")
+        parser.add_option(
+            '--save_screenshot', action="store_true",
+            dest='save_screenshot',
+            default=False,
+            help="""Take a screenshot on last page after the last step
+                    of the test. (Added to the "latest_logs" folder.)""")
+        parser.add_option(
+            '--visual_baseline', action='store_true',
+            dest='visual_baseline',
+            default=False,
+            help="""Setting this resets the visual baseline for
+                    Automated Visual Testing with SeleniumBase.
+                    When a test calls self.check_window(), it will
+                    rebuild its files in the visual_baseline folder.""")
+        parser.add_option(
             '--timeout_multiplier', action='store',
             dest='timeout_multiplier',
             default=None,
@@ -140,6 +175,7 @@ class SeleniumBrowser(Plugin):
         test.test.servername = self.options.servername
         test.test.port = self.options.port
         test.test.proxy_string = self.options.proxy_string
+        test.test.user_agent = self.options.user_agent
         test.test.demo_mode = self.options.demo_mode
         test.test.demo_sleep = self.options.demo_sleep
         test.test.highlights = self.options.highlights
@@ -147,6 +183,9 @@ class SeleniumBrowser(Plugin):
         test.test.js_checking_on = self.options.js_checking_on
         test.test.ad_block_on = self.options.ad_block_on
         test.test.verify_delay = self.options.verify_delay  # MasterQA
+        test.test.disable_csp = self.options.disable_csp
+        test.test.save_screenshot_after_test = self.options.save_screenshot
+        test.test.visual_baseline = self.options.visual_baseline
         test.test.timeout_multiplier = self.options.timeout_multiplier
         test.test.use_grid = False
         if test.test.servername != "localhost":

@@ -52,7 +52,8 @@ def main():
 
         data = []
         data.append("[pytest]")
-        data.append("addopts = --capture=no --ignore conftest.py")
+        data.append("addopts = --capture=no --ignore conftest.py "
+                    "-p no:cacheprovider")
         data.append("filterwarnings = ignore::DeprecationWarning")
         file_path = "%s/%s" % (dir_name, "pytest.ini")
         file = codecs.open(file_path, "w+", "utf-8")
@@ -93,7 +94,7 @@ def main():
         data.append("        self.update_text('input#s', 'Robots!\\n')")
         data.append("        self.assert_text('Hooray robots!', '#content')")
         data.append("        self.open('https://xkcd.com/1319/')")
-        data.append("        self.assert_text('Automation', 'div#ctitle')")
+        data.append("        self.assert_exact_text('Automation', '#ctitle')")
         data.append("")
         file_path = "%s/%s" % (dir_name, "my_first_test.py")
         file = codecs.open(file_path, "w+", "utf-8")
@@ -139,7 +140,7 @@ def main():
 
         data = []
         data.append("class Page(object):")
-        data.append("    html = 'html'")
+        data.append('    html = "html"')
         data.append("")
         file_path = "%s/%s" % (dir_name_2, "page_objects.py")
         file = codecs.open(file_path, "w+", "utf-8")

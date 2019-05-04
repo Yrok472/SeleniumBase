@@ -1,4 +1,4 @@
-## Console Scripts
+## <img src="https://cdn2.hubspot.net/hubfs/100006/images/super_square_logo_3a.png" title="SeleniumBase" height="32"> Console Scripts
 
 SeleniumBase console scripts help you get things done more easily, such as installing web drivers, creating a test directory with necessary configuration files, converting old Webdriver unittest scripts into SeleniumBase code, and using the Selenium Grid.
 
@@ -48,6 +48,58 @@ into a SeleniumBase file. Adds ``_SB`` to the new
 file name while keeping the original file intact.
 Works with Katalon Recorder scripts.
 See: http://www.katalon.com/automation-recorder
+
+### extract-objects
+
+* Usage:
+``seleniumbase extract-objects [SELENIUMBASE_PYTHON_FILE]``
+
+* Output:
+Creates page objects based on selectors found in a
+seleniumbase Python file and saves those objects to the
+"page_objects.py" file in the same folder as the tests.
+
+### inject-objects
+
+* Usage:
+``seleniumbase inject-objects [SELENIUMBASE_PYTHON_FILE] [OPTIONS]``
+
+* Options:
+``-c``, ``--comments``  (Add object selectors to the comments.)
+
+* Output:
+Takes the page objects found in the "page_objects.py"
+file and uses those to replace matching selectors in
+the selected seleniumbase Python file.
+
+### objectify
+
+* Usage:
+``seleniumbase objectify [SELENIUMBASE_PYTHON_FILE] [OPTIONS]``
+
+* Options:
+``-c``, ``--comments``  (Add object selectors to the comments.)
+
+* Output:
+A modified version of the file where the selectors
+have been replaced with variable names defined in
+"page_objects.py", supporting the Page Object Pattern.
+(This has the same outcome as combining
+``extract-objects`` with ``inject-objects``)
+
+### revert-objects
+
+* Usage:
+``seleniumbase revert-objects [SELENIUMBASE_PYTHON_FILE] [OPTIONS]``
+
+* Options:
+``-c``, ``--comments``  (Keep existing comments for the lines.)
+
+* Output:
+Reverts the changes made by ``seleniumbase objectify ...`` or
+``seleniumbase inject-objects ...`` when run against a
+seleniumbase Python file. Objects will get replaced by
+selectors stored in the "page_objects.py" file.
 
 ### download
 

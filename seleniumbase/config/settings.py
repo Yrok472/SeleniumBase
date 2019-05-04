@@ -19,6 +19,7 @@ EXTREME_TIMEOUT = 30
 
 # If True, existing logs from past test runs will be saved and take up space.
 # If False, only the logs from the most recent test run will be saved locally.
+# You can also archive existing logs on the command line with: "--archive_logs"
 ARCHIVE_EXISTING_LOGS = False
 
 # If True, existing downloads from past runs will be saved and take up space.
@@ -26,13 +27,13 @@ ARCHIVE_EXISTING_LOGS = False
 ARCHIVE_EXISTING_DOWNLOADS = False
 
 # Default names for files saved during test failures.
-# (These files will get saved to the "latest_logs/" folder)
+# (These files will get saved to the "latest_logs/" folder.)
 SCREENSHOT_NAME = "screenshot.png"
 BASIC_INFO_NAME = "basic_test_info.txt"
 PAGE_SOURCE_NAME = "page_source.html"
 
-# Default names for folders and files saved when reports are turned on.
-# Usage: "--report" and "--with-testing_base" together. (NOSETESTS only)
+# Default names for files and folders saved when using nosetests reports.
+# Usage: "--report". (NOSETESTS only)
 LATEST_REPORT_DIR = "latest_report"
 REPORT_ARCHIVE_DIR = "archived_reports"
 HTML_REPORT = "report.html"
@@ -53,9 +54,6 @@ This adds wait_for_angularjs() after various browser actions.
 '''
 WAIT_FOR_ANGULARJS = True
 
-# Option to start Chrome in full screen mode by default
-START_CHROME_IN_FULL_SCREEN_MODE = False
-
 # Default time to wait after each browser action performed during Demo Mode.
 # Use Demo Mode when you want others to see what your automation is doing.
 # Usage: "--demo_mode". (Can be overwritten by using "--demo_sleep=TIME".)
@@ -68,6 +66,21 @@ HIGHLIGHTS = 4
 # Default time to keep messenger notifications visible (in seconds).
 # Messenger notifications appear when reaching assert statements in Demo Mode.
 DEFAULT_MESSAGE_DURATION = 2.55
+
+# If True, the Content Security Policy will be disabled on Firefox.
+# If False, each website's default Content Security Policy will be used.
+# (A website's CSP may prevent SeleniumBase from loading custom JavaScript.)
+# If using demo_mode or MasterQA, this value will become True regardless.
+# You can also disable the CSP on the command line by using "--disable_csp".
+DISABLE_CSP_ON_FIREFOX = True
+
+# If True, the Content Security Policy will be disabled on Chrome.
+# If False, each website's default Content Security Policy will be used.
+# (A website's CSP may prevent SeleniumBase from loading custom JavaScript.)
+# If using demo_mode or MasterQA, this value will become True regardless,
+# with the exception of running in headless mode, in which case it'll be False.
+# You can also disable the CSP on the command line by using "--disable_csp".
+DISABLE_CSP_ON_CHROME = False
 
 # If True, an Exception is raised immediately for invalid proxy string syntax.
 # If False, a Warning will appear after the test, with no proxy server used.

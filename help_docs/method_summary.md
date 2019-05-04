@@ -33,6 +33,15 @@ self.get_text(selector, by=By.CSS_SELECTOR, timeout=settings.SMALL_TIMEOUT)
 self.get_attribute(selector, attribute, by=By.CSS_SELECTOR,
     timeout=settings.SMALL_TIMEOUT)
 
+self.set_attribute(selector, attribute, value, by=By.CSS_SELECTOR,
+    timeout=settings.SMALL_TIMEOUT)
+
+self.remove_attribute(selector, attribute, by=By.CSS_SELECTOR,
+    timeout=settings.SMALL_TIMEOUT)
+
+self.get_property_value(selector, property, by=By.CSS_SELECTOR,
+    timeout=settings.SMALL_TIMEOUT)
+
 self.refresh_page()
 
 self.refresh()
@@ -71,11 +80,11 @@ self.is_partial_link_text_visible(partial_link_text)
 
 self.is_text_visible(text, selector="html", by=By.CSS_SELECTOR)
 
-self.find_elements(selector, by=By.CSS_SELECTOR)
+self.find_elements(selector, by=By.CSS_SELECTOR, limit=0)
 
-self.find_visible_elements(selector, by=By.CSS_SELECTOR)
+self.find_visible_elements(selector, by=By.CSS_SELECTOR, limit=0)
 
-self.click_visible_elements(selector, by=By.CSS_SELECTOR)
+self.click_visible_elements(selector, by=By.CSS_SELECTOR, limit=0)
 
 self.is_element_in_an_iframe(selector, by=By.CSS_SELECTOR)
 
@@ -129,9 +138,6 @@ self.post_error_message(message, duration=None, pause=True)
 self.set_messenger_theme(theme="default", location="default",
     max_messages="default")
 
-self.get_property_value(selector, property, by=By.CSS_SELECTOR,
-    timeout=settings.SMALL_TIMEOUT)
-
 self.bring_to_front(selector, by=By.CSS_SELECTOR)
 
 self.highlight(selector, by=By.CSS_SELECTOR, loops=4, scroll=True)
@@ -166,7 +172,21 @@ self.get_domain_url(url)
 
 self.get_beautiful_soup(source=None)
 
+self.get_unique_links()
+
+self.get_link_status_code(link, allow_redirects=False, timeout=5)
+
+self.assert_link_status_code_is_not_404(link)
+
+self.assert_no_404_errors(multithreaded=True)
+
+self.print_unique_links_with_status_codes()
+
 self.safe_execute_script(script)
+
+self.create_folder(folder)
+
+self.save_element_as_image_file(selector, file_name, folder=None)
 
 self.download_file(file_url, destination_folder=None)
 
@@ -256,9 +276,15 @@ self.find_element(selector, by=By.CSS_SELECTOR, timeout=settings.LARGE_TIMEOUT)
 self.assert_element(
     selector, by=By.CSS_SELECTOR, timeout=settings.SMALL_TIMEOUT)
 
+self.assert_element_visible(
+    selector, by=By.CSS_SELECTOR, timeout=settings.SMALL_TIMEOUT)
+
 ########
 
 self.wait_for_text_visible(text, selector="html", by=By.CSS_SELECTOR,
+    timeout=settings.LARGE_TIMEOUT)
+
+self.wait_for_exact_text_visible(text, selector="html", by=By.CSS_SELECTOR,
     timeout=settings.LARGE_TIMEOUT)
 
 self.wait_for_text(text, selector="html", by=By.CSS_SELECTOR,
@@ -271,6 +297,9 @@ self.assert_text_visible(text, selector="html", by=By.CSS_SELECTOR,
     timeout=settings.SMALL_TIMEOUT)
 
 self.assert_text(text, selector="html", by=By.CSS_SELECTOR,
+    timeout=settings.SMALL_TIMEOUT)
+
+self.assert_exact_text(text, selector="html", by=By.CSS_SELECTOR,
     timeout=settings.SMALL_TIMEOUT)
 
 ########
@@ -329,6 +358,8 @@ self.open_new_window(switch_to=True)
 self.switch_to_window(window, timeout=settings.SMALL_TIMEOUT)
 
 self.switch_to_default_window()
+
+self.check_window(name="default", level=0, baseline=False)
 
 self.save_screenshot(name, folder=None)
 

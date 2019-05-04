@@ -7,14 +7,17 @@ import traceback
 from seleniumbase.config import settings
 
 
-def log_screenshot(test_logpath, driver):
+def log_screenshot(test_logpath, driver, screenshot=None, get=False):
     screenshot_name = settings.SCREENSHOT_NAME
     screenshot_path = "%s/%s" % (test_logpath, screenshot_name)
     try:
-        element = driver.find_element_by_tag_name('body')
-        element_png = element.screenshot_as_png
+        if not screenshot:
+            element = driver.find_element_by_tag_name('body')
+            screenshot = element.screenshot_as_base64
         with open(screenshot_path, "wb") as file:
-            file.write(element_png)
+            file.write(screenshot)
+        if get:
+            return screenshot
     except Exception:
         try:
             driver.get_screenshot_as_file(screenshot_path)
@@ -101,7 +104,7 @@ def get_html_source_with_base_href(driver, page_source):
     return ''
 
 
-def log_folder_setup(log_path):
+def log_folder_setup(log_path, archive_logs=False):
     """ Handle Logging """
     if log_path.endswith("/"):
         log_path = log_path[:-1]
@@ -125,5 +128,5 @@ def log_folder_setup(log_path):
                 archived_folder, int(time.time()))
             shutil.move(log_path, archived_logs)
             os.makedirs(log_path)
-            if not settings.ARCHIVE_EXISTING_LOGS:
+            if not settings.ARCHIVE_EXISTING_LOGS and not archive_logs:
                 shutil.rmtree(archived_logs)

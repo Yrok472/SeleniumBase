@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 The BaseCase class is the main gateway for using The SeleniumBase Framework.
 It inherits Python's unittest.TestCase class, and runs with Pytest or Nose.
@@ -21,15 +22,23 @@ Page elements are given enough time to load before WebDriver acts on them.
 Code becomes greatly simplified and easier to maintain.
 """
 
+import codecs
+import json
 import logging
 import math
 import os
-import pytest
 import re
 import sys
 import time
 import unittest
 import uuid
+from selenium.common.exceptions import (StaleElementReferenceException,
+                                        MoveTargetOutOfBoundsException,
+                                        WebDriverException)
+from selenium.common import exceptions as selenium_exceptions
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import Select
 from seleniumbase import config as sb_config
 from seleniumbase.common import decorators
 from seleniumbase.config import settings
@@ -38,24 +47,13 @@ from seleniumbase.core.testcase_manager import TestcaseManager
 from seleniumbase.core import download_helper
 from seleniumbase.core import log_helper
 from seleniumbase.core import tour_helper
+from seleniumbase.core import visual_helper
 from seleniumbase.fixtures import constants
 from seleniumbase.fixtures import js_utils
 from seleniumbase.fixtures import page_actions
 from seleniumbase.fixtures import page_utils
 from seleniumbase.fixtures import xpath_to_css
-from selenium.common.exceptions import (StaleElementReferenceException,
-                                        MoveTargetOutOfBoundsException,
-                                        WebDriverException)
-from selenium.common import exceptions as selenium_exceptions
-try:
-    # Selenium 3 (ElementNotInteractableException does not exist in selenium 2)
-    ENI_Exception = selenium_exceptions.ElementNotInteractableException
-except Exception:
-    # Selenium 2 (Keep compatibility with seleneium 2.53.6 if still being used)
-    ENI_Exception = selenium_exceptions.ElementNotSelectableException
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import Select
+ENI_Exception = selenium_exceptions.ElementNotInteractableException
 
 
 class BaseCase(unittest.TestCase):
@@ -71,8 +69,10 @@ class BaseCase(unittest.TestCase):
         self.env = None  # Add a shortened version of self.environment
         self.__last_url_of_delayed_assert = "data:,"
         self.__last_page_load_url = "data:,"
-        self.__page_check_count = 0
-        self.__page_check_failures = []
+        self.__last_page_screenshot = None
+        self.__last_page_screenshot_png = None
+        self.__delayed_assert_count = 0
+        self.__delayed_assert_failures = []
         # Requires self._* instead of self.__* for external class use
         self._html_report_extra = []  # (Used by pytest_plugin.py)
         self._default_driver = None
@@ -399,6 +399,7 @@ class BaseCase(unittest.TestCase):
 
     def get_attribute(self, selector, attribute, by=By.CSS_SELECTOR,
                       timeout=settings.SMALL_TIMEOUT):
+        """ This method uses JavaScript to get the value of an attribute. """
         if self.timeout_multiplier and timeout == settings.SMALL_TIMEOUT:
             timeout = self.__get_new_timeout(timeout)
         if page_utils.is_xpath_selector(selector):
@@ -424,6 +425,79 @@ class BaseCase(unittest.TestCase):
             raise Exception("Element {%s} has no attribute {%s}!" % (
                 selector, attribute))
 
+    def set_attribute(self, selector, attribute, value, by=By.CSS_SELECTOR,
+                      timeout=settings.SMALL_TIMEOUT):
+        """ This method uses JavaScript to set/update an attribute. """
+        if self.timeout_multiplier and timeout == settings.SMALL_TIMEOUT:
+            timeout = self.__get_new_timeout(timeout)
+        if page_utils.is_xpath_selector(selector):
+            by = By.XPATH
+        if self.is_element_visible(selector, by=by):
+            self.scroll_to(selector, by=by, timeout=timeout)
+        attribute = re.escape(attribute)
+        attribute = self.__escape_quotes_if_needed(attribute)
+        value = re.escape(value)
+        value = self.__escape_quotes_if_needed(value)
+        css_selector = self.convert_to_css_selector(selector, by=by)
+        css_selector = re.escape(css_selector)
+        css_selector = self.__escape_quotes_if_needed(css_selector)
+        script = ("""document.querySelector('%s').setAttribute('%s','%s');"""
+                  % (css_selector, attribute, value))
+        self.execute_script(script)
+
+    def remove_attribute(self, selector, attribute, by=By.CSS_SELECTOR,
+                         timeout=settings.SMALL_TIMEOUT):
+        """ This method uses JavaScript to remove an attribute. """
+        if self.timeout_multiplier and timeout == settings.SMALL_TIMEOUT:
+            timeout = self.__get_new_timeout(timeout)
+        if page_utils.is_xpath_selector(selector):
+            by = By.XPATH
+        if self.is_element_visible(selector, by=by):
+            self.scroll_to(selector, by=by, timeout=timeout)
+        attribute = re.escape(attribute)
+        attribute = self.__escape_quotes_if_needed(attribute)
+        css_selector = self.convert_to_css_selector(selector, by=by)
+        css_selector = re.escape(css_selector)
+        css_selector = self.__escape_quotes_if_needed(css_selector)
+        script = ("""document.querySelector('%s').removeAttribute('%s');"""
+                  % (css_selector, attribute))
+        self.execute_script(script)
+
+    def get_property_value(self, selector, property, by=By.CSS_SELECTOR,
+                           timeout=settings.SMALL_TIMEOUT):
+        """ Returns the property value of a page element's computed style.
+            Example:
+                opacity = self.get_property_value("html body a", "opacity")
+                self.assertTrue(float(opacity) > 0, "Element not visible!") """
+        if self.timeout_multiplier and timeout == settings.SMALL_TIMEOUT:
+            timeout = self.__get_new_timeout(timeout)
+        if page_utils.is_xpath_selector(selector):
+            by = By.XPATH
+        if page_utils.is_link_text_selector(selector):
+            selector = page_utils.get_link_text_from_selector(selector)
+            by = By.LINK_TEXT
+        self.wait_for_ready_state_complete()
+        page_actions.wait_for_element_present(
+            self.driver, selector, by, timeout)
+        try:
+            selector = self.convert_to_css_selector(selector, by=by)
+        except Exception:
+            # Don't run action if can't convert to CSS_Selector for JavaScript
+            raise Exception(
+                "Exception: Could not convert {%s}(by=%s) to CSS_SELECTOR!" % (
+                    selector, by))
+        selector = re.escape(selector)
+        selector = self.__escape_quotes_if_needed(selector)
+        script = ("""var $elm = document.querySelector('%s');
+                  $val = window.getComputedStyle($elm).getPropertyValue('%s');
+                  return $val;"""
+                  % (selector, property))
+        value = self.execute_script(script)
+        if value is not None:
+            return value
+        else:
+            return ""  # Return an empty string if the property doesn't exist
+
     def refresh_page(self):
         self.__last_page_load_url = None
         self.driver.refresh()
@@ -437,13 +511,16 @@ class BaseCase(unittest.TestCase):
         return self.driver.current_url
 
     def get_page_source(self):
+        self.wait_for_ready_state_complete()
         return self.driver.page_source
 
     def get_page_title(self):
+        self.wait_for_ready_state_complete()
         return self.driver.title
 
     def get_title(self):
         """ The shorter version of self.get_page_title() """
+        self.wait_for_ready_state_complete()
         return self.driver.title
 
     def go_back(self):
@@ -637,46 +714,59 @@ class BaseCase(unittest.TestCase):
             by = By.LINK_TEXT
         return page_actions.is_text_visible(self.driver, text, selector, by)
 
-    def find_elements(self, selector, by=By.CSS_SELECTOR):
-        """ Returns a list of matching WebElements. """
+    def find_elements(self, selector, by=By.CSS_SELECTOR, limit=0):
+        """ Returns a list of matching WebElements.
+            If "limit" is set and > 0, will only return that many elements. """
         self.wait_for_ready_state_complete()
         if page_utils.is_xpath_selector(selector):
             by = By.XPATH
         if page_utils.is_link_text_selector(selector):
             selector = page_utils.get_link_text_from_selector(selector)
             by = By.LINK_TEXT
-        return self.driver.find_elements(by=by, value=selector)
+        elements = self.driver.find_elements(by=by, value=selector)
+        if limit and limit > 0 and len(elements) > limit:
+            elements = elements[:limit]
+        return elements
 
-    def find_visible_elements(self, selector, by=By.CSS_SELECTOR):
-        """ Returns a list of matching WebElements that are visible. """
+    def find_visible_elements(self, selector, by=By.CSS_SELECTOR, limit=0):
+        """ Returns a list of matching WebElements that are visible.
+            If "limit" is set and > 0, will only return that many elements. """
         self.wait_for_ready_state_complete()
         if page_utils.is_xpath_selector(selector):
             by = By.XPATH
         if page_utils.is_link_text_selector(selector):
             selector = page_utils.get_link_text_from_selector(selector)
             by = By.LINK_TEXT
-        return page_actions.find_visible_elements(self.driver, selector, by)
+        v_elems = page_actions.find_visible_elements(self.driver, selector, by)
+        if limit and limit > 0 and len(v_elems) > limit:
+            v_elems = v_elems[:limit]
+        return v_elems
 
-    def click_visible_elements(self, selector, by=By.CSS_SELECTOR):
+    def click_visible_elements(self, selector, by=By.CSS_SELECTOR, limit=0):
         """ Finds all matching page elements and clicks visible ones in order.
             If a click reloads or opens a new page, the clicking will stop.
             Works best for actions such as clicking all checkboxes on a page.
             Example:  self.click_visible_elements('input[type="checkbox"]')
-        """
+            If "limit" is set and > 0, will only click that many elements. """
         elements = self.find_elements(selector, by=by)
         count = 0
+        click_count = 0
         for element in elements:
+            if limit and limit > 0 and click_count >= limit:
+                return
             count += 1
             if count == 1:
                 self.wait_for_ready_state_complete()
                 if self.is_element_visible(selector, by=by):
                     self.click(selector, by=by)
+                    click_count += 1
             else:
                 self.wait_for_ready_state_complete()
                 try:
                     if element.is_displayed():
                         self.__scroll_to_element(element)
                         element.click()
+                        click_count += 1
                 except (StaleElementReferenceException, ENI_Exception):
                     self.wait_for_ready_state_complete()
                     time.sleep(0.05)
@@ -684,6 +774,7 @@ class BaseCase(unittest.TestCase):
                         if element.is_displayed():
                             self.__scroll_to_element(element)
                             element.click()
+                            click_count += 1
                     except (StaleElementReferenceException, ENI_Exception):
                         return  # Probably on new page / Elements are all stale
 
@@ -1280,41 +1371,6 @@ class BaseCase(unittest.TestCase):
             duration = float(duration) + 0.15
             time.sleep(float(duration))
 
-    def get_property_value(self, selector, property, by=By.CSS_SELECTOR,
-                           timeout=settings.SMALL_TIMEOUT):
-        """ Returns the property value of a page element's computed style.
-            Example:
-                opacity = self.get_property_value("html body a", "opacity")
-                self.assertTrue(float(opacity) > 0, "Element not visible!") """
-        if self.timeout_multiplier and timeout == settings.SMALL_TIMEOUT:
-            timeout = self.__get_new_timeout(timeout)
-        if page_utils.is_xpath_selector(selector):
-            by = By.XPATH
-        if page_utils.is_link_text_selector(selector):
-            selector = page_utils.get_link_text_from_selector(selector)
-            by = By.LINK_TEXT
-        self.wait_for_ready_state_complete()
-        page_actions.wait_for_element_present(
-            self.driver, selector, by, timeout)
-        try:
-            selector = self.convert_to_css_selector(selector, by=by)
-        except Exception:
-            # Don't run action if can't convert to CSS_Selector for JavaScript
-            raise Exception(
-                "Exception: Could not convert {%s}(by=%s) to CSS_SELECTOR!" % (
-                    selector, by))
-        selector = re.escape(selector)
-        selector = self.__escape_quotes_if_needed(selector)
-        script = ("""var $elm = document.querySelector('%s');
-                  $val = window.getComputedStyle($elm).getPropertyValue('%s');
-                  return $val;"""
-                  % (selector, property))
-        value = self.execute_script(script)
-        if value is not None:
-            return value
-        else:
-            return ""  # Return an empty string if the property doesn't exist
-
     def bring_to_front(self, selector, by=By.CSS_SELECTOR):
         """ Updates the Z-index of a page element to bring it into view.
             Useful when getting a WebDriverException, such as the one below:
@@ -1566,6 +1622,53 @@ class BaseCase(unittest.TestCase):
         soup = BeautifulSoup(source, "html.parser")
         return soup
 
+    def get_unique_links(self):
+        """ Get all unique links in the html of the page source.
+            Page links include those obtained from:
+            "a"->"href", "img"->"src", "link"->"href", and "script"->"src". """
+        page_url = self.get_current_url()
+        soup = self.get_beautiful_soup(self.get_page_source())
+        links = page_utils._get_unique_links(page_url, soup)
+        return links
+
+    def get_link_status_code(self, link, allow_redirects=False, timeout=5):
+        """ Get the status code of a link.
+            If the timeout is exceeded, will return a 404.
+            For a list of available status codes, see:
+            https://en.wikipedia.org/wiki/List_of_HTTP_status_codes """
+        status_code = page_utils._get_link_status_code(
+            link, allow_redirects=allow_redirects, timeout=timeout)
+        return status_code
+
+    def assert_link_status_code_is_not_404(self, link):
+        status_code = str(self.get_link_status_code(link))
+        bad_link_str = 'Error: "%s" returned a 404!' % link
+        self.assert_not_equal(status_code, "404", bad_link_str)
+
+    def assert_no_404_errors(self, multithreaded=True):
+        """ Assert no 404 errors from page links obtained from:
+            "a"->"href", "img"->"src", "link"->"href", and "script"->"src". """
+        links = self.get_unique_links()
+        if multithreaded:
+            from multiprocessing.dummy import Pool as ThreadPool
+            pool = ThreadPool(10)
+            pool.map(self.assert_link_status_code_is_not_404, links)
+            pool.close()
+            pool.join()
+        else:
+            for link in links:
+                self.assert_link_status_code_is_not_404(link)
+
+    def print_unique_links_with_status_codes(self):
+        """ Finds all unique links in the html of the page source
+            and then prints out those links with their status codes.
+            Format:  ["link"  ->  "status_code"]  (per line)
+            Page links include those obtained from:
+            "a"->"href", "img"->"src", "link"->"href", and "script"->"src". """
+        page_url = self.get_current_url()
+        soup = self.get_beautiful_soup(self.get_page_source())
+        page_utils._print_unique_links_with_status_codes(page_url, soup)
+
     def safe_execute_script(self, script):
         """ When executing a script that contains a jQuery command,
             it's important that the jQuery library has been loaded first.
@@ -1576,6 +1679,39 @@ class BaseCase(unittest.TestCase):
             # The likely reason this fails is because: "jQuery is not defined"
             self.activate_jquery()  # It's a good thing we can define it here
             self.execute_script(script)
+
+    def create_folder(self, folder):
+        """ Creates a folder of the given name if it doesn't already exist. """
+        if folder.endswith("/"):
+            folder = folder[:-1]
+        if len(folder) < 1:
+            raise Exception("Minimum folder name length = 1.")
+        if not os.path.exists(folder):
+            try:
+                os.makedirs(folder)
+            except Exception:
+                pass
+
+    def save_element_as_image_file(self, selector, file_name, folder=None):
+        """ Take a screenshot of an element and save it as an image file.
+            If no folder is specified, will save it to the current folder. """
+        element = self.find_element(selector)
+        element_png = element.screenshot_as_png
+        if len(file_name.split('.')[0]) < 1:
+            raise Exception("Error: file_name length must be > 0.")
+        if not file_name.endswith(".png"):
+            file_name = file_name + ".png"
+        image_file_path = None
+        if folder:
+            if folder.endswith("/"):
+                folder = folder[:-1]
+            if len(folder) > 0:
+                self.create_folder(folder)
+                image_file_path = "%s/%s" % (folder, file_name)
+        if not image_file_path:
+            image_file_path = file_name
+        with open(image_file_path, "wb") as file:
+            file.write(element_png)
 
     def download_file(self, file_url, destination_folder=None):
         """ Downloads the file from the url to the destination folder.
@@ -1619,16 +1755,16 @@ class BaseCase(unittest.TestCase):
         assert os.path.exists(self.get_path_of_downloaded_file(file))
 
     def assert_true(self, expr, msg=None):
-        self.assertTrue(expr, msg=None)
+        self.assertTrue(expr, msg=msg)
 
     def assert_false(self, expr, msg=None):
-        self.assertFalse(expr, msg=None)
+        self.assertFalse(expr, msg=msg)
 
     def assert_equal(self, first, second, msg=None):
-        self.assertEqual(first, second, msg=None)
+        self.assertEqual(first, second, msg=msg)
 
     def assert_not_equal(self, first, second, msg=None):
-        self.assertNotEqual(first, second, msg=None)
+        self.assertNotEqual(first, second, msg=msg)
 
     def assert_no_js_errors(self):
         """ Asserts that there are no JavaScript "SEVERE"-level page errors.
@@ -1643,10 +1779,13 @@ class BaseCase(unittest.TestCase):
             # If unable to get browser logs, skip the assert and return.
             return
 
+        messenger_library = "//cdnjs.cloudflare.com/ajax/libs/messenger"
         errors = []
         for entry in browser_logs:
             if entry['level'] == 'SEVERE':
-                errors.append(entry)
+                if messenger_library not in entry['message']:
+                    # Add errors if not caused by SeleniumBase dependencies
+                    errors.append(entry)
         if len(errors) > 0:
             current_url = self.get_current_url()
             raise Exception(
@@ -2048,6 +2187,15 @@ class BaseCase(unittest.TestCase):
             self.__highlight_with_assert_success(messenger_post, selector, by)
         return True
 
+    def assert_element_visible(self, selector, by=By.CSS_SELECTOR,
+                               timeout=settings.SMALL_TIMEOUT):
+        """ Same as self.assert_element()
+            As above, will raise an exception if nothing can be found. """
+        if self.timeout_multiplier and timeout == settings.SMALL_TIMEOUT:
+            timeout = self.__get_new_timeout(timeout)
+        self.assert_element(selector, by=by, timeout=timeout)
+        return True
+
     # For backwards compatibility, earlier method names of the next
     # four methods have remained even though they do the same thing,
     # with the exception of assert_*, which won't return the element,
@@ -2063,6 +2211,19 @@ class BaseCase(unittest.TestCase):
             selector = page_utils.get_link_text_from_selector(selector)
             by = By.LINK_TEXT
         return page_actions.wait_for_text_visible(
+            self.driver, text, selector, by, timeout)
+
+    def wait_for_exact_text_visible(self, text, selector="html",
+                                    by=By.CSS_SELECTOR,
+                                    timeout=settings.LARGE_TIMEOUT):
+        if self.timeout_multiplier and timeout == settings.LARGE_TIMEOUT:
+            timeout = self.__get_new_timeout(timeout)
+        if page_utils.is_xpath_selector(selector):
+            by = By.XPATH
+        if page_utils.is_link_text_selector(selector):
+            selector = page_utils.get_link_text_from_selector(selector)
+            by = By.LINK_TEXT
+        return page_actions.wait_for_exact_text_visible(
             self.driver, text, selector, by, timeout)
 
     def wait_for_text(self, text, selector="html", by=By.CSS_SELECTOR,
@@ -2096,6 +2257,29 @@ class BaseCase(unittest.TestCase):
         if self.timeout_multiplier and timeout == settings.SMALL_TIMEOUT:
             timeout = self.__get_new_timeout(timeout)
         self.wait_for_text_visible(text, selector, by=by, timeout=timeout)
+
+        if self.demo_mode:
+            if page_utils.is_xpath_selector(selector):
+                by = By.XPATH
+            if page_utils.is_link_text_selector(selector):
+                selector = page_utils.get_link_text_from_selector(selector)
+                by = By.LINK_TEXT
+            messenger_post = ("ASSERT TEXT {%s} in %s: %s"
+                              % (text, by, selector))
+            self.__highlight_with_assert_success(messenger_post, selector, by)
+        return True
+
+    def assert_exact_text(self, text, selector="html", by=By.CSS_SELECTOR,
+                          timeout=settings.SMALL_TIMEOUT):
+        """ Similar to assert_text(), but the text must be exact, rather than
+            exist as a subset of the full text.
+            (Extra whitespace at the beginning or the end doesn't count.)
+            Raises an exception if the element or the text is not found.
+            Returns True if successful. Default timeout = SMALL_TIMEOUT. """
+        if self.timeout_multiplier and timeout == settings.SMALL_TIMEOUT:
+            timeout = self.__get_new_timeout(timeout)
+        self.wait_for_exact_text_visible(
+            text, selector, by=by, timeout=timeout)
 
         if self.demo_mode:
             if page_utils.is_xpath_selector(selector):
@@ -2146,7 +2330,7 @@ class BaseCase(unittest.TestCase):
         return True
 
     # For backwards compatibility, earlier method names of the next
-    # four methods have remained even though they do the same thing,
+    # three methods have remained even though they do the same thing,
     # with the exception of assert_*, which won't return the element,
     # but like the others, will raise an exception if the call fails.
 
@@ -2295,13 +2479,205 @@ class BaseCase(unittest.TestCase):
     def switch_to_default_window(self):
         self.switch_to_window(0)
 
+    def check_window(self, name="default", level=0, baseline=False):
+        """ ***  Automated Visual Testing with SeleniumBase  ***
+
+            The first time a test calls self.check_window() for a unique "name"
+            parameter provided, it will set a visual baseline, meaning that it
+            creates a folder, saves the URL to a file, saves the current window
+            screenshot to a file, and creates the following three files
+            with the listed data saved:
+            tags_level1.txt  ->  HTML tags from the window
+            tags_level2.txt  ->  HTML tags + attributes from the window
+            tags_level3.txt  ->  HTML tags + attributes/values from the window
+
+            Baseline folders are named based on the test name and the name
+            parameter passed to self.check_window(). The same test can store
+            multiple baseline folders.
+
+            If the baseline is being set/reset, the "level" doesn't matter.
+
+            After the first run of self.check_window(), it will compare the
+            HTML tags of the latest window to the one from the initial run.
+            Here's how the level system works:
+            * level=0 ->
+                DRY RUN ONLY - Will perform a comparison to the baseline, and
+                               print out any differences that are found, but
+                               won't fail the test even if differences exist.
+            * level=1 ->
+                HTML tags are compared to tags_level1.txt
+            * level=2 ->
+                HTML tags are compared to tags_level1.txt and
+                HTML tags/attributes are compared to tags_level2.txt
+            * level=3 ->
+                HTML tags are compared to tags_level1.txt and
+                HTML tags + attributes are compared to tags_level2.txt and
+                HTML tags + attributes/values are compared to tags_level3.txt
+            As shown, Level-3 is the most strict, Level-1 is the least strict.
+            If the comparisons from the latest window to the existing baseline
+            don't match, the current test will fail, except for Level-0 tests.
+
+            You can reset the visual baseline on the command line by using:
+                --visual_baseline
+            As long as "--visual_baseline" is used on the command line while
+            running tests, the self.check_window() method cannot fail because
+            it will rebuild the visual baseline rather than comparing the html
+            tags of the latest run to the existing baseline. If there are any
+            expected layout changes to a website that you're testing, you'll
+            need to reset the baseline to prevent unnecessary failures.
+
+            self.check_window() will fail with "Page Domain Mismatch Failure"
+            if the page domain doesn't match the domain of the baseline.
+
+            If you want to use self.check_window() to compare a web page to
+            a later version of itself from within the same test run, you can
+            add the parameter "baseline=True" to the first time you call
+            self.check_window() in a test to use that as the baseline. This
+            only makes sense if you're calling self.check_window() more than
+            once with the same name parameter in the same test.
+
+            Automated Visual Testing with self.check_window() is not very
+            effective for websites that have dynamic content that changes
+            the layout and structure of web pages. For those, you're much
+            better off using regular SeleniumBase functional testing.
+
+            Example usage:
+                self.check_window(name="testing", level=0)
+                self.check_window(name="xkcd_home", level=1)
+                self.check_window(name="github_page", level=2)
+                self.check_window(name="wikipedia_page", level=3)
+        """
+        if level == "0":
+            level = 0
+        if level == "1":
+            level = 1
+        if level == "2":
+            level = 2
+        if level == "3":
+            level = 3
+        if level != 0 and level != 1 and level != 2 and level != 3:
+            raise Exception('Parameter "level" must be set to 0, 1, 2, or 3!')
+
+        module = self.__class__.__module__
+        if '.' in module and len(module.split('.')[-1]) > 1:
+            module = module.split('.')[-1]
+        test_id = "%s.%s" % (module, self._testMethodName)
+        if not name or len(name) < 1:
+            name = "default"
+        name = str(name)
+        visual_helper.visual_baseline_folder_setup()
+        baseline_dir = constants.VisualBaseline.STORAGE_FOLDER
+        visual_baseline_path = baseline_dir + "/" + test_id + "/" + name
+        page_url_file = visual_baseline_path + "/page_url.txt"
+        screenshot_file = visual_baseline_path + "/screenshot.png"
+        level_1_file = visual_baseline_path + "/tags_level_1.txt"
+        level_2_file = visual_baseline_path + "/tags_level_2.txt"
+        level_3_file = visual_baseline_path + "/tags_level_3.txt"
+
+        set_baseline = False
+        if baseline or self.visual_baseline:
+            set_baseline = True
+        if not os.path.exists(visual_baseline_path):
+            set_baseline = True
+            try:
+                os.makedirs(visual_baseline_path)
+            except Exception:
+                pass  # Only reachable during multi-threaded test runs
+        if not os.path.exists(page_url_file):
+            set_baseline = True
+        if not os.path.exists(screenshot_file):
+            set_baseline = True
+        if not os.path.exists(level_1_file):
+            set_baseline = True
+        if not os.path.exists(level_2_file):
+            set_baseline = True
+        if not os.path.exists(level_3_file):
+            set_baseline = True
+
+        page_url = self.get_current_url()
+        soup = self.get_beautiful_soup()
+        html_tags = soup.body.find_all()
+        level_1 = [[tag.name] for tag in html_tags]
+        level_1 = json.loads(json.dumps(level_1))  # Tuples become lists
+        level_2 = [[tag.name, sorted(tag.attrs.keys())] for tag in html_tags]
+        level_2 = json.loads(json.dumps(level_2))  # Tuples become lists
+        level_3 = [[tag.name, sorted(tag.attrs.items())] for tag in html_tags]
+        level_3 = json.loads(json.dumps(level_3))  # Tuples become lists
+
+        if set_baseline:
+            self.save_screenshot("screenshot.png", visual_baseline_path)
+            out_file = codecs.open(page_url_file, "w+")
+            out_file.writelines(page_url)
+            out_file.close()
+            out_file = codecs.open(level_1_file, "w+")
+            out_file.writelines(json.dumps(level_1))
+            out_file.close()
+            out_file = codecs.open(level_2_file, "w+")
+            out_file.writelines(json.dumps(level_2))
+            out_file.close()
+            out_file = codecs.open(level_3_file, "w+")
+            out_file.writelines(json.dumps(level_3))
+            out_file.close()
+
+        if not set_baseline:
+            f = open(page_url_file, 'r')
+            page_url_data = f.read().strip()
+            f.close()
+            f = open(level_1_file, 'r')
+            level_1_data = json.loads(f.read())
+            f.close()
+            f = open(level_2_file, 'r')
+            level_2_data = json.loads(f.read())
+            f.close()
+            f = open(level_3_file, 'r')
+            level_3_data = json.loads(f.read())
+            f.close()
+
+            domain_fail = (
+                "Page Domain Mismatch Failure: "
+                "Current Page Domain doesn't match the Page Domain of the "
+                "Baseline! Can't compare two completely different sites! "
+                "Run with --visual_baseline to reset the baseline!")
+            level_1_failure = (
+                "\n\n*** Exception: <Level 1> Visual Diff Failure:\n"
+                "* HTML tags don't match the baseline!")
+            level_2_failure = (
+                "\n\n*** Exception: <Level 2> Visual Diff Failure:\n"
+                "* HTML tag attributes don't match the baseline!")
+            level_3_failure = (
+                "\n\n*** Exception: <Level 3> Visual Diff Failure:\n"
+                "* HTML tag attribute values don't match the baseline!")
+
+            page_domain = self.get_domain_url(page_url)
+            page_data_domain = self.get_domain_url(page_url_data)
+            unittest.TestCase.maxDiff = 1000
+            if level == 1 or level == 2 or level == 3:
+                self.assert_equal(page_domain, page_data_domain, domain_fail)
+                self.assert_equal(level_1, level_1_data, level_1_failure)
+            unittest.TestCase.maxDiff = None
+            if level == 2 or level == 3:
+                self.assert_equal(level_2, level_2_data, level_2_failure)
+            if level == 3:
+                self.assert_equal(level_3, level_3_data, level_3_failure)
+            if level == 0:
+                try:
+                    unittest.TestCase.maxDiff = 1000
+                    self.assert_equal(
+                        page_domain, page_data_domain, domain_fail)
+                    self.assert_equal(level_1, level_1_data, level_1_failure)
+                    unittest.TestCase.maxDiff = None
+                    self.assert_equal(level_2, level_2_data, level_2_failure)
+                    self.assert_equal(level_3, level_3_data, level_3_failure)
+                except Exception as e:
+                    print(e)  # Level-0 Dry Run (Only print the differences)
+
     def save_screenshot(self, name, folder=None):
         """ The screenshot will be in PNG format. """
         return page_actions.save_screenshot(self.driver, name, folder)
 
     def get_new_driver(self, browser=None, headless=None,
-                       servername=None, port=None, proxy=None, switch_to=True,
-                       cap_file=None):
+                       servername=None, port=None, proxy=None, agent=None,
+                       switch_to=True, cap_file=None, disable_csp=None):
         """ This method spins up an extra browser for tests that require
             more than one. The first browser is already provided by tests
             that import base_case.BaseCase from seleniumbase. If parameters
@@ -2351,6 +2727,13 @@ class BaseCase(unittest.TestCase):
         proxy_string = proxy
         if proxy_string is None:
             proxy_string = self.proxy_string
+        user_agent = agent
+        if user_agent is None:
+            user_agent = self.user_agent
+        if disable_csp is None:
+            disable_csp = self.disable_csp
+        if self.demo_mode or self.masterqa_mode:
+            disable_csp = True
         if cap_file is None:
             cap_file = self.cap_file
         valid_browsers = constants.ValidBrowsers.valid_browsers
@@ -2365,7 +2748,9 @@ class BaseCase(unittest.TestCase):
                                                  servername=servername,
                                                  port=port,
                                                  proxy_string=proxy_string,
-                                                 cap_file=cap_file)
+                                                 user_agent=user_agent,
+                                                 cap_file=cap_file,
+                                                 disable_csp=disable_csp)
         self._drivers_list.append(new_driver)
         if switch_to:
             self.driver = new_driver
@@ -2380,12 +2765,15 @@ class BaseCase(unittest.TestCase):
                     # WebDrivers can get closed during tearDown().
                     pass
             else:
-                if self.browser == 'chrome':
+                if self.browser == 'chrome' or self.browser == 'opera':
                     try:
-                        if settings.START_CHROME_IN_FULL_SCREEN_MODE:
-                            self.driver.maximize_window()
-                        else:
-                            self.driver.set_window_size(1250, 840)
+                        self.driver.set_window_size(1250, 840)
+                        self.wait_for_ready_state_complete()
+                    except Exception:
+                        pass  # Keep existing browser resolution
+                elif self.browser == 'edge':
+                    try:
+                        self.driver.maximize_window()
                         self.wait_for_ready_state_complete()
                     except Exception:
                         pass  # Keep existing browser resolution
@@ -2456,16 +2844,16 @@ class BaseCase(unittest.TestCase):
         """ Add a delayed_assert failure into a list for future processing. """
         current_url = self.driver.current_url
         message = self.__get_exception_message()
-        self.__page_check_failures.append(
+        self.__delayed_assert_failures.append(
             "CHECK #%s: (%s)\n %s" % (
-                self.__page_check_count, current_url, message))
+                self.__delayed_assert_count, current_url, message))
 
     def delayed_assert_element(self, selector, by=By.CSS_SELECTOR,
                                timeout=settings.MINI_TIMEOUT):
         """ A non-terminating assertion for an element on a page.
             Failures will be saved until the process_delayed_asserts()
             method is called from inside a test, likely at the end of it. """
-        self.__page_check_count += 1
+        self.__delayed_assert_count += 1
         try:
             url = self.get_current_url()
             if url == self.__last_url_of_delayed_assert:
@@ -2486,7 +2874,7 @@ class BaseCase(unittest.TestCase):
         """ A non-terminating assertion for text from an element on a page.
             Failures will be saved until the process_delayed_asserts()
             method is called from inside a test, likely at the end of it. """
-        self.__page_check_count += 1
+        self.__delayed_assert_count += 1
         try:
             url = self.get_current_url()
             if url == self.__last_url_of_delayed_assert:
@@ -2513,12 +2901,12 @@ class BaseCase(unittest.TestCase):
             the delayed asserts on a single html page so that the failure
             screenshot matches the location of the delayed asserts.
             If "print_only" is set to True, the exception won't get raised. """
-        if self.__page_check_failures:
+        if self.__delayed_assert_failures:
             exception_output = ''
             exception_output += "\n*** DELAYED ASSERTION FAILURES FOR: "
             exception_output += "%s\n" % self.id()
-            all_failing_checks = self.__page_check_failures
-            self.__page_check_failures = []
+            all_failing_checks = self.__delayed_assert_failures
+            self.__delayed_assert_failures = []
             for tb in all_failing_checks:
                 exception_output += "%s\n" % tb
             if print_only:
@@ -2653,6 +3041,7 @@ class BaseCase(unittest.TestCase):
         except Exception:
             # Don't highlight if can't convert to CSS_SELECTOR
             return
+        self.__slow_scroll_to_element(element)
 
         o_bs = ''  # original_box_shadow
         style = element.get_attribute('style')
@@ -2687,12 +3076,13 @@ class BaseCase(unittest.TestCase):
 
     ############
 
-    def setUp(self):
+    def setUp(self, masterqa_mode=False):
         """
         Be careful if a subclass of BaseCase overrides setUp()
         You'll need to add the following line to the subclass setUp() method:
         super(SubClassOfBaseCase, self).setUp()
         """
+        self.masterqa_mode = masterqa_mode
         self.is_pytest = None
         try:
             # This raises an exception if the test is not coming from pytest
@@ -2725,13 +3115,21 @@ class BaseCase(unittest.TestCase):
             self.servername = sb_config.servername
             self.port = sb_config.port
             self.proxy_string = sb_config.proxy_string
+            self.user_agent = sb_config.user_agent
             self.cap_file = sb_config.cap_file
             self.database_env = sb_config.database_env
             self.message_duration = sb_config.message_duration
             self.js_checking_on = sb_config.js_checking_on
             self.ad_block_on = sb_config.ad_block_on
             self.verify_delay = sb_config.verify_delay
+            self.disable_csp = sb_config.disable_csp
+            self.save_screenshot_after_test = sb_config.save_screenshot
+            self.visual_baseline = sb_config.visual_baseline
             self.timeout_multiplier = sb_config.timeout_multiplier
+            self.pytest_html_report = sb_config.pytest_html_report
+            self.report_on = False
+            if self.pytest_html_report:
+                self.report_on = True
             self.use_grid = False
             if self.servername != "localhost":
                 # Use Selenium Grid (Use --server=127.0.0.1 for localhost Grid)
@@ -2795,9 +3193,39 @@ class BaseCase(unittest.TestCase):
                                           servername=self.servername,
                                           port=self.port,
                                           proxy=self.proxy_string,
+                                          agent=self.user_agent,
                                           switch_to=True,
-                                          cap_file=self.cap_file)
+                                          cap_file=self.cap_file,
+                                          disable_csp=self.disable_csp)
         self._default_driver = self.driver
+
+    def __set_last_page_screenshot(self):
+        """ self.__last_page_screenshot is only for pytest html report logs
+            self.__last_page_screenshot_png is for all screenshot log files """
+        if not self.__last_page_screenshot and (
+                not self.__last_page_screenshot_png):
+            try:
+                element = self.driver.find_element_by_tag_name('body')
+                if self.is_pytest and self.report_on:
+                    self.__last_page_screenshot_png = (
+                        self.driver.get_screenshot_as_png())
+                    self.__last_page_screenshot = element.screenshot_as_base64
+                else:
+                    self.__last_page_screenshot_png = element.screenshot_as_png
+            except Exception:
+                if not self.__last_page_screenshot:
+                    if self.is_pytest and self.report_on:
+                        try:
+                            self.__last_page_screenshot = (
+                                self.driver.get_screenshot_as_base64())
+                        except Exception:
+                            pass
+                if not self.__last_page_screenshot_png:
+                    try:
+                        self.__last_page_screenshot_png = (
+                            self.driver.get_screenshot_as_png())
+                    except Exception:
+                        pass
 
     def __insert_test_result(self, state, err):
         data_payload = TestcaseDataPayload()
@@ -2821,15 +3249,24 @@ class BaseCase(unittest.TestCase):
 
     def __add_pytest_html_extra(self):
         try:
-            pytest_html = pytest.config.pluginmanager.getplugin('html')
-            if self.with_selenium and pytest_html:
-                driver = self.driver
-                extra_url = pytest_html.extras.url(driver.current_url)
-                screenshot = driver.get_screenshot_as_base64()
-                extra_image = pytest_html.extras.image(screenshot,
-                                                       name='Screenshot')
-                self._html_report_extra.append(extra_url)
-                self._html_report_extra.append(extra_image)
+            if self.with_selenium:
+                if not self.__last_page_screenshot:
+                    self.__set_last_page_screenshot()
+                if self.report_on:
+                    extra_url = {}
+                    extra_url['name'] = 'URL'
+                    extra_url['format'] = 'url'
+                    extra_url['content'] = self.get_current_url()
+                    extra_url['mime_type'] = None
+                    extra_url['extension'] = None
+                    extra_image = {}
+                    extra_image['name'] = 'Screenshot'
+                    extra_image['format'] = 'image'
+                    extra_image['content'] = self.__last_page_screenshot
+                    extra_image['mime_type'] = 'image/png'
+                    extra_image['extension'] = 'png'
+                    self._html_report_extra.append(extra_url)
+                    self._html_report_extra.append(extra_image)
         except Exception:
             pass
 
@@ -2858,7 +3295,7 @@ class BaseCase(unittest.TestCase):
                 has_exception = True
         else:
             has_exception = sys.exc_info()[1] is not None
-        if self.__page_check_failures:
+        if self.__delayed_assert_failures:
             print(
                 "\nWhen using self.delayed_assert_*() methods in your tests, "
                 "remember to call self.process_delayed_asserts() afterwards. "
@@ -2910,22 +3347,49 @@ class BaseCase(unittest.TestCase):
                 # Save a screenshot if logging is on when an exception occurs
                 if has_exception:
                     self.__add_pytest_html_extra()
+                if self.with_testing_base and not has_exception and (
+                        self.save_screenshot_after_test):
+                    test_logpath = self.log_path + "/" + test_id
+                    if not os.path.exists(test_logpath):
+                        try:
+                            os.makedirs(test_logpath)
+                        except Exception:
+                            pass  # Only reachable during multi-threaded runs
+                    if not self.__last_page_screenshot_png:
+                        self.__set_last_page_screenshot()
+                    log_helper.log_screenshot(
+                        test_logpath,
+                        self.driver,
+                        self.__last_page_screenshot_png)
+                    self.__add_pytest_html_extra()
                 if self.with_testing_base and has_exception:
                     test_logpath = self.log_path + "/" + test_id
                     if not os.path.exists(test_logpath):
-                        os.makedirs(test_logpath)
+                        try:
+                            os.makedirs(test_logpath)
+                        except Exception:
+                            pass  # Only reachable during multi-threaded runs
                     if ((not self.with_screen_shots) and (
                             not self.with_basic_test_info) and (
                             not self.with_page_source)):
                         # Log everything if nothing specified (if testing_base)
-                        log_helper.log_screenshot(test_logpath, self.driver)
+                        if not self.__last_page_screenshot_png:
+                            self.__set_last_page_screenshot()
+                        log_helper.log_screenshot(
+                            test_logpath,
+                            self.driver,
+                            self.__last_page_screenshot_png)
                         log_helper.log_test_failure_data(
                             self, test_logpath, self.driver, self.browser)
                         log_helper.log_page_source(test_logpath, self.driver)
                     else:
                         if self.with_screen_shots:
+                            if not self.__last_page_screenshot_png:
+                                self.__set_last_page_screenshot()
                             log_helper.log_screenshot(
-                                test_logpath, self.driver)
+                                test_logpath,
+                                self.driver,
+                                self.__last_page_screenshot_png)
                         if self.with_basic_test_info:
                             log_helper.log_test_failure_data(
                                 self, test_logpath, self.driver, self.browser)
@@ -2979,11 +3443,41 @@ class BaseCase(unittest.TestCase):
                                         self._testMethodName)
                 test_logpath = "latest_logs/" + test_id
                 if not os.path.exists(test_logpath):
-                    os.makedirs(test_logpath)
+                    try:
+                        os.makedirs(test_logpath)
+                    except Exception:
+                        pass  # Only reachable during multi-threaded runs
                 log_helper.log_test_failure_data(
                     self, test_logpath, self.driver, self.browser)
                 if len(self._drivers_list) > 0:
-                    log_helper.log_screenshot(test_logpath, self.driver)
+                    if not self.__last_page_screenshot_png:
+                        self.__set_last_page_screenshot()
+                    log_helper.log_screenshot(
+                        test_logpath,
+                        self.driver,
+                        self.__last_page_screenshot_png)
                     log_helper.log_page_source(test_logpath, self.driver)
+            elif self.save_screenshot_after_test:
+                test_id = "%s.%s.%s" % (self.__class__.__module__,
+                                        self.__class__.__name__,
+                                        self._testMethodName)
+                test_logpath = "latest_logs/" + test_id
+                if not os.path.exists(test_logpath):
+                    try:
+                        os.makedirs(test_logpath)
+                    except Exception:
+                        pass  # Only reachable during multi-threaded runs
+                if not self.__last_page_screenshot_png:
+                    self.__set_last_page_screenshot()
+                log_helper.log_screenshot(
+                    test_logpath,
+                    self.driver,
+                    self.__last_page_screenshot_png)
+            if self.report_on:
+                self._last_page_screenshot = self.__last_page_screenshot_png
+                try:
+                    self._last_page_url = self.get_current_url()
+                except Exception:
+                    self._last_page_url = "(Error: Unknown URL)"
             # Finally close all open browser windows
             self.__quit_all_drivers()

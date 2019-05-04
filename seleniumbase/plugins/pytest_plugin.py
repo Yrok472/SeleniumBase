@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """ This is the pytest configuration file """
 
 import optparse
@@ -47,10 +48,20 @@ def pytest_addoption(parser):
     parser.addoption('--with-testing_base', action="store_true",
                      dest='with_testing_base',
                      default=True,
-                     help="Use to save logs (screenshots) when tests fail.")
+                     help="""Use to save logs and screenshots when tests fail.
+                          The following options are now active by default
+                          with --with-testing_base (which is on by default):
+                          --with-screen_shots ,
+                          --with-basic_test_info ,
+                          --with-page_source
+                          """)
     parser.addoption('--log_path', dest='log_path',
                      default='latest_logs/',
                      help='Where the log files are saved.')
+    parser.addoption('--archive_logs', action="store_true",
+                     dest='archive_logs',
+                     default=False,
+                     help="Archive old log files instead of deleting them.")
     parser.addoption('--with-db_reporting', action="store_true",
                      dest='with_db_reporting',
                      default=False,
@@ -70,15 +81,18 @@ def pytest_addoption(parser):
     parser.addoption('--with-screen_shots', action="store_true",
                      dest='with_screen_shots',
                      default=False,
-                     help="Use to save screenshots on test failure.")
+                     help="""Use to save screenshots on test failure.
+                          (Automatically on when using --with-testing_base)""")
     parser.addoption('--with-basic_test_info', action="store_true",
                      dest='with_basic_test_info',
                      default=False,
-                     help="Use to save basic test info on test failure.")
+                     help="""Use to save basic test info on test failure.
+                          (Automatically on when using --with-testing_base)""")
     parser.addoption('--with-page_source', action="store_true",
                      dest='with_page_source',
                      default=False,
-                     help="Use to save page source on test failure.")
+                     help="""Use to save page source on test failure.
+                          (Automatically on when using --with-testing_base)""")
     parser.addoption('--server', action='store',
                      dest='servername',
                      default='localhost',
@@ -96,6 +110,12 @@ def pytest_addoption(parser):
                           Format: servername:port.  OR
                                   username:password@servername:port  OR
                                   A dict key from proxy_list.PROXY_LIST
+                          Default: None.""")
+    parser.addoption('--agent', action='store',
+                     dest='user_agent',
+                     default=None,
+                     help="""Designates the User-Agent for the browser to use.
+                          Format: A string.
                           Default: None.""")
     parser.addoption('--headless', action="store_true",
                      dest='headless',
@@ -140,6 +160,27 @@ def pytest_addoption(parser):
                      default=None,
                      help="""Setting this overrides the default wait time
                           before each MasterQA verification pop-up.""")
+    parser.addoption('--disable_csp', action="store_true",
+                     dest='disable_csp',
+                     default=False,
+                     help="""Using this disables the Content Security Policy of
+                          websites, which may interfere with some features of
+                          SeleniumBase, such as loading custom JavaScript
+                          libraries for various testing actions.
+                          Setting this to True (--disable_csp) overrides the
+                          value set in seleniumbase/config/settings.py""")
+    parser.addoption('--save_screenshot', action='store_true',
+                     dest='save_screenshot',
+                     default=False,
+                     help="""Take a screenshot on last page after the last step
+                          of the test. (Added to the "latest_logs" folder.)""")
+    parser.addoption('--visual_baseline', action='store_true',
+                     dest='visual_baseline',
+                     default=False,
+                     help="""Setting this resets the visual baseline for
+                          Automated Visual Testing with SeleniumBase.
+                          When a test calls self.check_window(), it will
+                          rebuild its files in the visual_baseline folder.""")
     parser.addoption('--timeout_multiplier', action='store',
                      dest='timeout_multiplier',
                      default=None,
@@ -155,6 +196,7 @@ def pytest_configure(config):
     sb_config.data = config.getoption('data')
     sb_config.environment = config.getoption('environment')
     sb_config.with_selenium = config.getoption('with_selenium')
+    sb_config.user_agent = config.getoption('user_agent')
     sb_config.headless = config.getoption('headless')
     sb_config.with_testing_base = config.getoption('with_testing_base')
     sb_config.with_db_reporting = config.getoption('with_db_reporting')
@@ -168,6 +210,7 @@ def pytest_configure(config):
     sb_config.cap_file = config.getoption('cap_file')
     sb_config.database_env = config.getoption('database_env')
     sb_config.log_path = config.getoption('log_path')
+    sb_config.archive_logs = config.getoption('archive_logs')
     sb_config.demo_mode = config.getoption('demo_mode')
     sb_config.demo_sleep = config.getoption('demo_sleep')
     sb_config.highlights = config.getoption('highlights')
@@ -175,10 +218,14 @@ def pytest_configure(config):
     sb_config.js_checking_on = config.getoption('js_checking_on')
     sb_config.ad_block_on = config.getoption('ad_block_on')
     sb_config.verify_delay = config.getoption('verify_delay')
+    sb_config.disable_csp = config.getoption('disable_csp')
+    sb_config.save_screenshot = config.getoption('save_screenshot')
+    sb_config.visual_baseline = config.getoption('visual_baseline')
     sb_config.timeout_multiplier = config.getoption('timeout_multiplier')
+    sb_config.pytest_html_report = config.getoption("htmlpath")  # --html=FILE
 
     if sb_config.with_testing_base:
-        log_helper.log_folder_setup(sb_config.log_path)
+        log_helper.log_folder_setup(sb_config.log_path, sb_config.archive_logs)
     proxy_helper.remove_proxy_zip_if_present()
 
 
@@ -223,6 +270,7 @@ def pytest_runtest_makereport(item, call):
         try:
             extra_report = item._testcase._html_report_extra
             extra = getattr(report, 'extra', [])
-            report.extra = extra + extra_report
+            if extra_report[1]["content"]:
+                report.extra = extra + extra_report
         except Exception:
             pass

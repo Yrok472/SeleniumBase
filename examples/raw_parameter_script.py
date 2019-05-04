@@ -32,9 +32,16 @@ except (ImportError, ValueError):
     b.port = 4444
     b.data = None
     b.environment = "test"
+    b.user_agent = None
     b.database_env = "test"
     b.log_path = "latest_logs/"
+    b.archive_logs = False
+    b.disable_csp = False
+    b.visual_baseline = False
+    b.save_screenshot_after_test = False
     b.timeout_multiplier = None
+    b.pytest_html_report = None
+    b.report_on = False
     b.with_db_reporting = False
     b.with_s3_logging = False
     b.js_checking_on = False
